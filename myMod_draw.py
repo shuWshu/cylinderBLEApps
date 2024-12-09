@@ -1,6 +1,9 @@
 """
 自作モジュール
 タッチ位置の描画
+諸々の機能
+・フリック
+・（ドラッグ）
 """
 from myMod_BLEReader import *
 from myMod_makeCircle import *
@@ -9,7 +12,7 @@ import cv2
 import math
 
 class drawTouch():
-    def __init__(self):
+    def __init__(self, autoDraw=True, stopKey=True):
         self.centroids = [] # タッチ領域の重心を格納
         self.stats = [] # タッチ領域の面積などを格納
         self.arrow = [] # 矢印用の座標保存
@@ -17,18 +20,26 @@ class drawTouch():
         self.flagFlick = -1 # フリック直前のフラグ -1:未準備，0:準備中，1~:表示フレーム数として管理
         self.rate = 100 # 拡大倍率
         self.threshold = 100 # しきい値
+        self.flagEnd = False # 終了フラグ
+
+        self.autoDraw = autoDraw # ドロー処理を自動的に行うか
+        self.stopKey = stopKey # "q"キーでの停止の有無
 
         self.blereader = BLEreader()
 
     def startDraw(self):
         self.blereader.startBLE()
-        while 1:
-            self._updateDraw()
-            if cv2.waitKey(1)&0xff == ord("q"):
-                self._stop_program()
-                break
+        if self.autoDraw:
+            while 1:
+                self.updateDraw()
+                if cv2.waitKey(1)&0xff == ord("q") and self.stopKey:
+                    self._stop_program()
+                    break
+                elif self.flagEnd:
+                    break
 
-    def _updateDraw(self):
+    # 描画の更新
+    def updateDraw(self):
         canv = np.zeros((rxNum, txNum), np.uint8)  # [rx][tx]での表示値の配列 グレースケール
         timelineDict = self.blereader.getTimelineDict()
         for rx in range(rxNum):
@@ -141,3 +152,8 @@ class drawTouch():
 
     def _stop_program(self):
         self.blereader.stop_program()
+
+    def stop_program(self):
+        self._stop_program()
+        self.flagEnd = True
+
