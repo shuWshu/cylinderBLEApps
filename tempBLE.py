@@ -8,7 +8,7 @@ blereader = BLEreader()
 blereader.startBLE()
 
 for i in range(10):
-    print(blereader.getTimelineDict())
+    #print(blereader.getTimelineDict())
     time.sleep(1)
 
 blereader.stop_program()

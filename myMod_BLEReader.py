@@ -102,7 +102,7 @@ class BLEreader():
                         self.timelineDict["angX"].append(datas[4])
                         self.timelineDict["angY"].append(datas[5])
                         self.timelineDict["angZ"].append(datas[6])
-                        # print(datas[1:])
+                        # print(f"{[-int(i)*9.8/16384 for i in datas[1:4]]}, {[-int(i)*250/32768 for i in datas[4:]]}")
 
     def startBLE(self):
         self.thread_ble = threading.Thread(target=self._run_ble) # BLEスレッドの作成
