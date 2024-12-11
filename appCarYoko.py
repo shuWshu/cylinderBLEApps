@@ -14,7 +14,22 @@ class drawTouchCar(drawTouch):
         self.app = app
     
     def flick(self, dx, dy, x, y):
-        self.app.carFlick(dx, dy, x, y)
+        # self.app.carFlick(dx, dy, x, y)
+        pass
+
+     # ドラッグ開始
+    def dragStart(self):
+        # print("dragStart")
+        self.app.carDragStart(self.dragLog[0])
+    # ドラッグ中
+    # 座標格納配列を送信
+    def dragging(self):
+        # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})")
+        self.app.carDragging(self.dragLog, self.dragCorrect)
+    # ドラッグ終了
+    def dragEnd(self):
+        # print("dragEnd")
+        self.app.carDragEnd()
 
 """アプリ"""
 # メインクラス
@@ -33,7 +48,7 @@ class App(ShowBase):
 
         # 車の情報保持変数
         self.carSpeed = 0
-        self.carAng = 0 # 角度（正面が0）
+        self.carAng = 180 # 角度（正面が0）
 
         # カメラ設定
         self.disableMouse() # カメラ操作を禁止
@@ -41,7 +56,7 @@ class App(ShowBase):
         self.camera.setPos(0, -30, 10) # 初期カメラ位置
         self.camera.lookAt(0, 0, 0.5) # カメラ焦点
 
-        width = 100
+        width = 1000
         # 地面の配置
         self.node_ground = self.render.attachNewNode(PandaNode('scene_node')) # 地面用ノードの追加
         self.ground = self.loader.loadModel('models/misc/rgbCube')
@@ -51,16 +66,17 @@ class App(ShowBase):
         self.ground.setColor(0.5, 0.5, 0.5) # 色の設定
 
         # 地面に線を引く
+        division = int(width / 10)
         for axis in range(2):
-            for i in range(11):
+            for i in range(division+1):
                 lines = LineSegs() # LineSegsオブジェクトを作成
                 lines.setColor(1, 1, 1, 1)  # 線の色設定(R,G,B,A)
                 if axis == 0:
-                    lines.moveTo(i*width/10-(width)/2, -width/2, 0.02) # 開始点へ移動
-                    lines.drawTo(i*width/10-(width)/2, width/2, 0.02) # 終了点へ線を引く
+                    lines.moveTo(i*width/division-(width)/2, -width/2, 0.02) # 開始点へ移動
+                    lines.drawTo(i*width/division-(width)/2, width/2, 0.02) # 終了点へ線を引く
                 elif axis == 1:
-                    lines.moveTo(-width/2, i*width/10-(width-10)/2-5,  0.02) # 開始点へ移動
-                    lines.drawTo(width/2, i*width/10-(width-10)/2-5,  0.02) # 終了点へ線を引く
+                    lines.moveTo(-width/2, i*width/division-(width-10)/2-5,  0.02) # 開始点へ移動
+                    lines.drawTo( width/2, i*width/division-(width-10)/2-5,  0.02) # 終了点へ線を引く
                 lineNode = lines.create()
                 self.render.attachNewNode(lineNode) # シーンにアタッチ
 
@@ -98,6 +114,30 @@ class App(ShowBase):
                     self.carAng -= 30 # 右折
                 else:
                     self.carAng += 30 # 左折
+
+    # ドラッグによる操作
+     # ドラッグ開始
+    def carDragStart(self, startPos):
+        self.dragStartPos = startPos # 開始座標の保存
+        self.dragStartSpeed = self.carSpeed # 開始速度の保存
+        self.dragStartAng = self.carAng # 開始角度の保存
+        print("dragStart")
+    # ドラッグ中
+    # 座標格納配列を送信
+    def carDragging(self, dragLog, dragCorrect):
+        draggingPos = (dragLog[-1][0]+dragCorrect, dragLog[-1][1]) # 補正込みの現在地
+        # print(f"{draggingPos}")
+        yArea = self.dragStartPos[1] / (rxNum * 100) # 初期値点から領域選択
+        if yArea < 1.0/2: # 速度操作
+            self.carSpeed = (draggingPos[0] - self.dragStartPos[0]) * 0.001 + self.dragStartSpeed # 速度を変化させる
+        else: # 回頭操作
+            self.carAng = (draggingPos[0] - self.dragStartPos[0]) * 360 / (txNum * self.drawtouch.rate) + self.dragStartAng
+
+
+    # ドラッグ終了
+    def carDragEnd(self):
+        print("dragEnd")
+        pass
     
     def resetCar(self):
         self.carSpeed = 0

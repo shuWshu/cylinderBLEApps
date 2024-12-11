@@ -146,6 +146,7 @@ class drawTouch():
             self.flagFlick = -1
             self.arrow.clear()
 
+        dragNum = 4
         # 主にドラッグ処理
         if self.flagDrag: # ドラッグ中
             nowPos = self.timelineMaxCentroids[-1]
@@ -157,18 +158,17 @@ class drawTouch():
                         self.dragCorrect += txNum * self.rate
                 
                 self.dragLog.append((nowPos[0], nowPos[1])) # 現在地をログに追加
-                self.draging()
-            elif not any(flagCircles[:6]): # 6回分全てログが無いなら
-                self.dragEnd()
-                print("rest")
+                self.dragging()
+            elif not any(flagCircles[:dragNum]): # 6回分全てログが無いなら
                 self.dragLog.clear() # 配列のリセット
                 self.dragCorrect = 0 # 補正値のクリア
                 self.flagDrag = False # フラグオフ
+                self.dragEnd()
         else: # 未ドラッグ
-            if all(flagCircles[:6]): # 過去6回分の履歴が存在する場合
-                self.dragStart()
+            if all(flagCircles[:dragNum]): # 過去6回分の履歴が存在する場合
                 self.dragLog.append(self.timelineMaxCentroids[-1]) # 現在地をログに追加
                 self.flagDrag = True # フラグオン
+                self.dragStart()
 
 
         # 矢印の描画
@@ -218,8 +218,8 @@ class drawTouch():
         pass
     # ドラッグ中
     # 座標格納配列を送信
-    def draging(self):
-        print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})")
+    def dragging(self):
+        print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})") # x軸座標は補正値を含める
         pass
     # ドラッグ終了
     def dragEnd(self):
