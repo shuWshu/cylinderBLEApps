@@ -1,1 +1,1 @@
-setHpr
+self.dragLog[0]

@@ -97,10 +97,12 @@ class drawTouch():
         if len(self.centroids) == 0: # 領域無し
             self.timelineMaxCentroids.append([]) # タイムラインに追加
         else:
-            # maxStatsID = areas["stats"].index(max(areas["stats"])) # 最大面積の領域を指定→微妙
+            # 注意!!!直前にやって失敗したら変更
+            # maxStatsID = 0
+            maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
             for i, coord in enumerate(self.centroids):
                 # print(i)
-                if i == 0: # TODO:最も明るい領域を指定するように変更したい
+                if i == maxStatsID: # TODO:最も明るい領域を指定するように変更したい
                     img = cv2.circle(img, coord, 10, (0, 0, 255), thickness=-1) 
                     self.timelineMaxCentroids.append(coord) # タイムラインに追加
                 else:
