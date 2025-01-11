@@ -23,11 +23,13 @@ class drawTouch():
         self.timelineMaxCentroids = [] # 最大エリアの座標ログを格納
         self.flagFlick = -1 # フリック直前のフラグ -1:未準備，0:準備中，1~:表示フレーム数として管理
         self.rate = 100 # 拡大倍率
-        self.threshold = 100 # しきい値
+        self.threshold = 50 # しきい値
         self.flagEnd = False # 終了フラグ
         self.flagDrag = False # ドラッグ処理のフラグ
         self.dragLog = [] # ドラッグ中の座標を記録する
         self.dragCorrect = 0 # ドラッグ中における，1回転時のx座標補正
+
+        self.deltaxLog = deque([0 for _ in range(5)], 5) # 変化量(変化した時限定)を5つ格納できるキュー
 
         # キャリブレーション関連
         with open("BLEApps/thresholdsDict.json") as f:
@@ -85,10 +87,12 @@ class drawTouch():
                     if valRate < 1: # レート1未満=未タッチ
                         val = 0
                     else: 
-                        val = min(1023 * (valRate-1), 1023) # (割合-1)を0~1023に割り当てる．一旦最大倍率2倍
+                        val = min(1023 * (valRate-1) / 2, 1023) # (割合-1)を0~1023に割り当てる．一旦最大倍率3倍
                 else:
                     if val < 250: # 250未満については黒色に変更（わかりづらいため）
                         val = 0
+                if rx < 3:
+                    val = 0
                 canv[rx][tx] =  val * 255 / 1023 # 0~1023を0~255に正規化して代入
         canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
         canv_dst = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_CUBIC) # バイキュービック補間での画像拡大
@@ -121,11 +125,12 @@ class drawTouch():
             self.stats.append(stats[i][4])
 
         # 最大領域
-        if len(self.centroids) == 0: # 領域無し
+        idmax = np.unravel_index(np.argmax(canv), canv.shape) # canv内の最大値インデックスを取得→一番明るい座標
+        val = canv[idmax[0]][idmax[1]]
+        if val < self.threshold: # 領域無し
             self.timelineMaxCentroids.append([]) # タイムラインに追加
         else:
             # maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
-            idmax = np.unravel_index(np.argmax(canv), canv.shape) # canv内の最大値インデックスを取得
             coordMax = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate)) # 最も明るい点について
             img = cv2.circle(img, coordMax, 10, (0, 0, 255), thickness=-1)  # 最も明るい点が割り当てられる座標に描画
             self.timelineMaxCentroids.append(coordMax) # タイムラインに追加
@@ -178,17 +183,35 @@ class drawTouch():
         if self.flagDrag: # ドラッグ中
             nowPos = self.timelineMaxCentroids[-1]
             if nowPos: # 現在タッチ中なら
-                if abs(nowPos[0] - self.dragLog[-1][0]) > txNum * self.rate / 2: # 端処理，現在地と1つ前のx座標の差が全体の半分を超えたなら
-                    if nowPos[0] > self.dragLog[-1][0]: 
-                        self.dragCorrect -= (txNum-1) * self.rate # 1週の座標合計値は2200であることが判明
-                    else:
-                        self.dragCorrect += (txNum-1) * self.rate
+                nowPos = [nowPos[0]+self.dragCorrect, nowPos[1]]
+                deltax = nowPos[0]-self.dragLog[-1][0] # 測定値を用いて差分ベクトルを計算
+                if deltax != 0: # 差分があるなら
+                    deltaLogSign = [np.sign(i) for i in self.deltaxLog] # 正のベクトルを+1，負のベクトルを-1として変換
+                    if sum(deltaLogSign) * deltax < 0 and abs(deltax) >= 600: # ベクトルの傾向とdeltaxの符号が一致するか 不一致の場合かつ600以上戻っている場合，端処理を行う
+                        if nowPos[0] > self.dragLog[-1][0]: 
+                            self.dragCorrect -= (txNum-1) * self.rate # 1週の座標合計値は2200であることが判明
+                            nowPos[0] -= (txNum-1) * self.rate
+                        else:
+                            self.dragCorrect += (txNum-1) * self.rate
+                            nowPos[0] += (txNum-1) * self.rate
+                    elif abs(nowPos[0] - self.dragLog[-1][0]) > txNum * self.rate / 2: # 端処理，現在地と1つ前のx座標の差が全体の半分を超えたなら
+                        if nowPos[0] > self.dragLog[-1][0]: 
+                            self.dragCorrect -= (txNum-1) * self.rate # 1週の座標合計値は2200であることが判明
+                            nowPos[0] -= (txNum-1) * self.rate
+                        else:
+                            self.dragCorrect += (txNum-1) * self.rate
+                            nowPos[0] += (txNum-1) * self.rate
                 
                 self.dragLog.append((nowPos[0], nowPos[1])) # 現在地をログに追加
+                deltax = self.dragLog[-1][0]-self.dragLog[-2][0]
+                if deltax != 0:
+                    self.deltaxLog.append(deltax)
+
                 self.dragging()
             elif not any(flagCircles[:dragNum]): # dragNum回分全てログが無いなら
                 self.dragLog.clear() # 配列のリセット
                 self.dragCorrect = 0 # 補正値のクリア
+                self.deltaxLog = deque([0 for _ in range(5)], 5) # 差分ログのクリア
                 self.flagDrag = False # フラグオフ
                 self.dragEnd()
         else: # 未ドラッグ
@@ -289,7 +312,10 @@ class drawTouch():
     # ドラッグ中
     # 座標格納配列を送信
     def dragging(self):
-        # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})") # x軸座標は補正値を含める
+        # print(f"({self.dragLog[-1]})") # ドラッグ中座標の出力
+        deltax = self.dragLog[-1][0]-self.dragLog[-2][0]
+        if deltax != 0:
+            print(f"{deltax}({self.dragLog[-1][0]})") # x座標の変化値
         pass
     # ドラッグ終了
     def dragEnd(self):

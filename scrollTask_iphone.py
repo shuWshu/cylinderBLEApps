@@ -15,7 +15,7 @@ import time
 
 # -----パラメータ-----
 ID = 0
-DIST = 40
+DIST = 200
 MODE = "iphone"
 # -----パラメータ-----
 

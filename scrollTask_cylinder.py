@@ -11,7 +11,7 @@ import threading
 
 # -----パラメータ-----
 ID = 0
-DIST = 40
+DIST = 0
 MODE = "cylinder"
 # -----パラメータ-----
 
@@ -33,7 +33,7 @@ class drawTouchFD(drawTouch):
     # 座標格納配列を送信
     def dragging(self):
         # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})")
-        self.app.scrolling(self.dragLog[-1][0], self.dragCorrect)
+        self.app.scrolling(self.dragLog[-1][0])
     # ドラッグ終了
     def dragEnd(self):
         # print("dragEnd")
@@ -68,9 +68,9 @@ class App_cylinder(App):
         self.draggedPos_x = startPos[0] # ドラッグ時の座標保存
 
     # ドラッグ中の処理
-    def scrolling(self, dragPos_x, dragCorrect):
-        draggingPos_x = dragPos_x+dragCorrect # 回転補正込みの現在地x
-        delta = draggingPos_x - self.draggedPos_x
+    def scrolling(self, dragPos_x):
+        draggingPos_x = dragPos_x# 回転補正込みの現在地x
+        delta = -(draggingPos_x - self.draggedPos_x)
         self.draggedPos_x = draggingPos_x
         if delta != 0: # 移動していたら
             print(delta)

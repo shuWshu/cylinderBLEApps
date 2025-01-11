@@ -64,20 +64,32 @@ class App(ShowBase):
         self.MODE = MODE # 操作条件
 
         # ファイル名の決定&ファイルを開く処理
-        serialNum = 0
+        self.serialNum = 0
         while True:
-            self.filename = f"result_scrollTask_{self.ID}_{self.MODE}_{serialNum}.csv"
+            self.filename = f"result_scrollTask_{self.ID}_{self.MODE}_{self.serialNum}.csv"
             try:
                 self.file = open(f'results/{self.filename}', 'x') # ファイルそのもの
                 self.writer = csv.writer(self.file) # ライター
                 break
             except FileExistsError: # ファイルが既に存在している
-                serialNum += 1
+                self.serialNum += 1
 
         self.SCROLLSTEP = 0.005 # スクロール操作の倍率
         self.MAXNUM = 600 # スクロールの長さ
         self.STARTNUM = 300 # 最初の値
-        self.TARGETS = [((i+1)%2)*self.DIST+self.STARTNUM for i in range(10)]
+        self.TARGETSDIST = [40, 100, 250] * 4
+        if DIST == 0:
+            self.TARGETS = []
+            for i, d in enumerate(self.TARGETSDIST):
+                if i == 0:
+                    self.TARGETS.append(self.TARGETSDIST[0] + self.STARTNUM)
+                elif i % 2 == 0:
+                    self.TARGETS.append(self.TARGETS[-1] + d)
+                else:
+                    self.TARGETS.append(self.TARGETS[-1] - d)
+        else:
+            self.TARGETS = [((i+1)%2)*self.DIST+self.STARTNUM for i in range(10)]
+        print(self.TARGETS)
 
         self.scrollDist = 0.0 # スクロール操作で移動した距離の総量
         self.selectNum = self.STARTNUM # 選択中の値
@@ -85,6 +97,7 @@ class App(ShowBase):
         self.startTime = 0 # 開始時間
         self.targetNum = -1 # ターゲットとしている数
         self.taskProgress = -1 # タスク完了数
+        self.downtimeStart =  None # 休憩時間
 
         self.lastMoveTime = time.perf_counter() # 最後に移動した時間を記録
         self.lastSwitchTime = time.perf_counter() # 最後に目盛りを切り替えた時間を記録
@@ -110,17 +123,19 @@ class App(ShowBase):
         # スクロール部分の描画
         cm = CardMaker("myCard") # カードの生成機を作成
         cm.setFrame(-0.4, 0.4, -0.145, 0.145)  # 大きさ（左, 右, 下, 上）
+        self.numbers = []
         for n in range(self.MAXNUM):
             card_np = self.node_scrollUImove.attachNewNode(cm.generate()) # カードを生成してアタッチ
             card_np.setPos(0, 0, -0.3*n) # 移動
             card_np.setColor(1, 1, 1, 1) # 色の設定
-            OnscreenText(
+            number = OnscreenText(
                 text=f"{n}",
                 pos=(0, -0.3*n-0.05), # 画面中央上あたり (X, Z)
                 scale=0.2, # 文字の大きさ
                 fg=(0, 0, 0, 1), # 文字色(R, G, B, A)
                 parent=self.node_scrollUImove
             ) # 数字の追加
+            self.numbers.append(number)
 
         draw_arrows(parent=self.node_scrollUI)
 
@@ -172,20 +187,33 @@ class App(ShowBase):
     # ターゲットに到達したかを判定する
     # 到達した場合，次のターゲットへの移行処理
     def updateReachTarget(self):
-        if self.selectNum == self.targetNum: # ターゲットを選択している
-            downtime = time.perf_counter() - self.lastSwitchTime
-            self.gauge.setScale(min(downtime, 1.0), 1, 1)
-            if downtime > 1: # 1秒以上目盛りを保持している
-            # if time.perf_counter() - self.lastMoveTime > 0.2: # 0.2秒以上停止している
-                timeNow = time.perf_counter()
-                self.timeStamp.append(timeNow) # タイムスタンプ追加
-                self.writer.writerow([timeNow-self.startTime, "Selected"]) # ファイル書き込み
-                self.taskProgress += 1
-                if self.taskProgress == len(self.TARGETS): # タスク終了判定
-                    return self.taskEnd(endTime=timeNow)
-                self.set_target()
-        else:
+        flagReach = False
+        if self.taskProgress % 2 == 0: # タスク進捗が偶数→大きい数字へ移動する
+            if self.selectNum >= self.targetNum: # ターゲット以上まで移動した
+                flagReach = True
+        else: # タスク進捗が奇数→小さい数字へ移動する
+            if self.selectNum <= self.targetNum: # ターゲット以下まで移動した
+                flagReach = True
+
+        if flagReach == True and self.downtimeStart is None: # ターゲットを通過している
+            # downtime = time.perf_counter() - self.lastSwitchTime
+            timeNow = time.perf_counter()
+            self.timeStamp.append(timeNow) # タイムスタンプ追加
+            self.writer.writerow([timeNow-self.startTime, "Selected"]) # ファイル書き込み
+            self.taskProgress += 1
+            if self.taskProgress == len(self.TARGETS): # タスク終了判定
+                return self.taskEnd(endTime=timeNow)
+            self.downtimeStart = time.perf_counter()
+            
+        if self.downtimeStart is None:
             self.gauge.setScale(0, 1, 1)
+        else:
+            downtime = time.perf_counter() - self.downtimeStart
+            if downtime >= 1.0: # 休憩1秒経過
+                self.downtimeStart = None
+                self.set_nextTarget()
+            self.gauge.setScale(1 - downtime, 1, 1)
+        
         
     
     # ファイルを開き直す処理
@@ -195,9 +223,22 @@ class App(ShowBase):
         self.writer = csv.writer(self.file) # ライター
 
     # 次のターゲットに移る処理
+    def set_nextTarget(self):
+        x, y, z = self.node_scrollUImove.getPos() # 現在位置を取得
+        self.node_scrollUImove.setPos(x, y, self.TARGETS[self.taskProgress-1]*(0.3)) # 前のターゲットの位置まで戻る
+        self.scrollDist = -(self.TARGETS[self.taskProgress-1]-self.STARTNUM)*(0.3) / self.SCROLLSTEP # 合計移動距離を合わせる
+        self.selectNum = -round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 選択した値も合わせる
+        self.rotateCount = 0 # 残りの回転フレーム数
+        self.rotateSpeed = 0 # 回転速度
+        self.numbers[self.TARGETS[self.taskProgress-1]].fg=(0, 0, 0, 1) # 文字色を黒に戻す
+        self.set_target()
+
+    # ターゲット設定処理
     def set_target(self):
-        self.targetNum = self.TARGETS[self.taskProgress] # 次のターゲットを取得
+        nextTargetNum = self.TARGETS[self.taskProgress] # 次のターゲットを取得
+        self.targetNum = nextTargetNum
         self.target.text = f"{self.targetNum}" # 次のターゲットに表示変更
+        self.numbers[self.targetNum].fg=(1, 0, 0, 1)
     
     # スタート処理
     def taskStart(self):
@@ -225,7 +266,7 @@ class App(ShowBase):
 
         with open(f"results/result_scrollTask_{self.ID}.csv", "a") as f:
             writer = csv.writer(f)
-            writer.writerow([self.MODE, self.DIST]+time_operation)
+            writer.writerow([self.MODE, self.serialNum, self.DIST]+time_operation+[endTime - self.timeStamp[0]])
     
     # 位置のリセット処理
     def reset(self):

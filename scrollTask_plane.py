@@ -10,7 +10,7 @@ from scrollTask_lib import App
 
 # -----パラメータ-----
 ID = 0
-DIST = 40
+DIST = 0
 MODE = "plane"
 # -----パラメータ-----
 
