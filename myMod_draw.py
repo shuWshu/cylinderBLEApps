@@ -10,6 +10,10 @@ from myMod_makeCircle import *
 import numpy as np
 import cv2
 import math
+import json
+from collections import deque
+
+thresholdsDictFileName = "BLEApps/thresholdsDict.json"
 
 class drawTouch():
     def __init__(self, autoDraw=True, stopKey=True, drawing=True):
@@ -25,8 +29,16 @@ class drawTouch():
         self.dragLog = [] # ドラッグ中の座標を記録する
         self.dragCorrect = 0 # ドラッグ中における，1回転時のx座標補正
 
+        # キャリブレーション関連
+        with open("BLEApps/thresholdsDict.json") as f:
+            thresholdsJson = json.load(f)
+        self.thresholdsDict = thresholdsJson # 各座標におけるキャリブレーション情報を格納する
+        print(self.thresholdsDict)
+        self.frameCalibration = 0 # キャリブレーション残りフレーム
+        self.flagCalibrated = True # キャリブレーション済みフラグ
+
         self.autoDraw = autoDraw # ドロー処理を自動的に行うか
-        self.stopKey = stopKey # "q"キーでの停止の有無
+        self.stopKey = stopKey # "q"キーでの停止などのキー処理の有無
         self.drawing = drawing # 描画結果を画面に出力するか
 
         self.blereader = BLEreader()
@@ -39,6 +51,8 @@ class drawTouch():
                 if cv2.waitKey(1)&0xff == ord("q") and self.stopKey:
                     self._stop_program()
                     break
+                elif cv2.waitKey(1)&0xff == ord("c") and self.stopKey:
+                    self.calibrationStart()
                 elif self.flagEnd:
                     break
 
@@ -46,6 +60,10 @@ class drawTouch():
     def updateDraw(self):
         canv = np.zeros((rxNum, txNum), np.uint8)  # [rx][tx]での表示値の配列 グレースケール
         timelineDict = self.blereader.getTimelineDict()
+
+        if self.frameCalibration > 0:
+            self._calibtation(timelineDict=timelineDict)
+
         for rx in range(rxNum):
             for tx in range(txNum):
                 key = f"{tx},{rx}"
@@ -60,10 +78,18 @@ class drawTouch():
                         vals.append(timelineDict[key][i])
                     i -= 1
                 val = max(vals) # 複数の値があるなら最大値を採用
-                if val < 220: # 250未満については黒色に変更（わかりづらいため）
-                    val = 0
+
+                # 補正処理
+                if self.flagCalibrated: # キャリブレーション済なら
+                    valRate = val / self.thresholdsDict[key] # 閾値に対する割合を出す
+                    if valRate < 1: # レート1未満=未タッチ
+                        val = 0
+                    else: 
+                        val = min(1023 * (valRate-1), 1023) # (割合-1)を0~1023に割り当てる．一旦最大倍率2倍
+                else:
+                    if val < 250: # 250未満については黒色に変更（わかりづらいため）
+                        val = 0
                 canv[rx][tx] =  val * 255 / 1023 # 0~1023を0~255に正規化して代入
-                
         canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
         canv_dst = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_CUBIC) # バイキュービック補間での画像拡大
         img = canv_dst.copy() # 描画用に画像のコピーを作成
@@ -98,14 +124,14 @@ class drawTouch():
         if len(self.centroids) == 0: # 領域無し
             self.timelineMaxCentroids.append([]) # タイムラインに追加
         else:
-            maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
-            for i, coord in enumerate(self.centroids):
-                # print(i)
-                if i == maxStatsID: # TODO:最も明るい領域を指定するように変更したい
-                    img = cv2.circle(img, coord, 10, (0, 0, 255), thickness=-1) 
-                    self.timelineMaxCentroids.append(coord) # タイムラインに追加
-                else:
-                    img = cv2.circle(img, coord, 10, (255, 0, 0), thickness=-1) # 円の描画
+            # maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
+            idmax = np.unravel_index(np.argmax(canv), canv.shape) # canv内の最大値インデックスを取得
+            coordMax = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate)) # 最も明るい点について
+            img = cv2.circle(img, coordMax, 10, (0, 0, 255), thickness=-1)  # 最も明るい点が割り当てられる座標に描画
+            self.timelineMaxCentroids.append(coordMax) # タイムラインに追加
+
+            for _, coord in enumerate(self.centroids):
+                img = cv2.circle(img, coord, 10, (255, 0, 0), thickness=-1) # 円の描画
 
         flagCircles = [] # 過去n回目に，値があることを示す
         recentMaxCentroids = self.timelineMaxCentroids[-6:]
@@ -192,9 +218,51 @@ class drawTouch():
                 self.arrow.clear()
                 self.flagFlick = -1
 
+        # 測定値のみを参照してドラッグ処理
+        self.dragCheckFromCanv(canv, img)
+
         if self.drawing: # 描画処理の有無
             cv2.imshow("near", canv_near)
             cv2.imshow("img", img) # 最終的な画像
+
+    # 各マスの測定値からのみでドラッグ判定を行う処理
+    def dragCheckFromCanv(self, canv, img): 
+        return
+        idmax = np.unravel_index(np.argmax(canv), canv.shape) # canv内の最大値インデックスを取得
+        val = canv[idmax[0]][idmax[1]]
+        if val > 100:
+            self.countNotTouch = 0
+            self.countTouch += 1
+            print(f"{idmax[1]}: {val}") # y座標
+            coord = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate))
+            img = cv2.circle(img, coord, 30, (0, 0, 255), thickness=-1) # 円の描画
+        else:
+            self.countNotTouch += 1
+            self.countTouch = 1
+        
+        # TODO:あとでコンストラクタへ移動
+        self.xLog = deque([1 for _ in range(3)], 3) # yの値を3つ格納できるキュー
+        self.deltaxLog = deque([0], 3) # y変化値(変化した時限定)を3つ格納できるキュー
+        self.countNotTouch = 0 # タッチしていないフレームを数える タッチ時0
+        self.countTouch = 0 # タッチ状態のフレーム数を数える 非タッチ時0
+        self.flagDragCanv = False
+
+        posx = idmax[1] # x座標ID値
+        deltax = posx-self.xLog[-1] # x座標変化値
+        if self.flagDragCanv: # ドラッグ中なら
+            if self.countTouch > 0: # タッチしている
+                # ADD:回転判定
+                self.xLog.append(posx) # 現座標格納
+                if deltax != 0: # 変化しているなら
+                    # ADD:変化値の送信
+                    self.deltaxLog.append(deltax) # 変化値格納
+            elif self.countNotTouch == 6: # ドラッグ終了判定 非タッチ6フレーム
+                self.flagDragCanv =  False # ドラッグ終了
+        else:
+            if self.countNotTouch > 3: # ドラッグ開始判定 タッチ4フレーム
+                self.xLog.append(posx) # 現座標(ドラッグ開始時座標)格納
+                self.deltaxLog = deque([0], 3) # 変化値はリセット
+                self.flagDragCanv =  True # ドラッグ開始
 
     # 距離の測定
     # 端同士の場合，特殊処理あり
@@ -234,6 +302,43 @@ class drawTouch():
     def stop_program(self):
         self._stop_program()
         self.flagEnd = True
+
+    # キャリブレーション開始時処理
+    def calibrationStart(self):
+        print("calibrationStart")
+        self.frameCalibration = 180 # キャリブレーション時間の設定
+        self.thresholdsDict = {} # 配列のリセット
+        self.flagCalibrated = False # キャリブレーション済フラグ
+        for rx in range(rxNum):
+            for tx in range(txNum):
+                key = f"{tx},{rx}"
+                self.thresholdsDict[key] = [] # 各値に空配列を代入
+
+    # キャリブレーション
+    def _calibtation(self, timelineDict):     
+        print("calibration...")   
+        for rx in range(rxNum):
+            for tx in range(txNum):
+                key = f"{tx},{rx}"
+                self.thresholdsDict[key].append(timelineDict[key][-1]) # 情報を配列に追加
+        self.frameCalibration -= 1
+
+        # キャリブレーション終了時処理
+        if self.frameCalibration == 0:
+            self._calibtationEnd()
+
+    # キャリブレーション終了時処理
+    def _calibtationEnd(self):
+        print("calibrationEnd")
+        for rx in range(rxNum):
+            for tx in range(txNum):
+                key = f"{tx},{rx}"
+                maxVal = max(self.thresholdsDict[key]) # 配列内最大値を取って，配列に代入
+                self.thresholdsDict[key] = maxVal # 代入
+        self.flagCalibrated = True # キャリブレーション済フラグ
+        with open("BLEApps/thresholdsDict.json", 'w') as f:
+            json.dump(self.thresholdsDict, f, indent=2) # json形式で保存
+        print(self.thresholdsDict)
 
 def main():
     drawtouch = drawTouch()

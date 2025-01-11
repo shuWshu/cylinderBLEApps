@@ -73,6 +73,7 @@ class App_cylinder(App):
         delta = draggingPos_x - self.draggedPos_x
         self.draggedPos_x = draggingPos_x
         if delta != 0: # 移動していたら
+            print(delta)
             self.rotate(delta_y=delta)
         pass
 
