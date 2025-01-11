@@ -12,7 +12,7 @@ import cv2
 import math
 
 class drawTouch():
-    def __init__(self, autoDraw=True, stopKey=True):
+    def __init__(self, autoDraw=True, stopKey=True, drawing=True):
         self.centroids = [] # タッチ領域の重心を格納
         self.stats = [] # タッチ領域の面積などを格納
         self.arrow = [] # 矢印用の座標保存
@@ -27,6 +27,7 @@ class drawTouch():
 
         self.autoDraw = autoDraw # ドロー処理を自動的に行うか
         self.stopKey = stopKey # "q"キーでの停止の有無
+        self.drawing = drawing # 描画結果を画面に出力するか
 
         self.blereader = BLEreader()
 
@@ -59,10 +60,10 @@ class drawTouch():
                         vals.append(timelineDict[key][i])
                     i -= 1
                 val = max(vals) # 複数の値があるなら最大値を採用
-                if val < 250: # 250未満については黒色に変更（わかりづらいため）
+                if val < 220: # 250未満については黒色に変更（わかりづらいため）
                     val = 0
                 canv[rx][tx] =  val * 255 / 1023 # 0~1023を0~255に正規化して代入
-
+                
         canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
         canv_dst = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_CUBIC) # バイキュービック補間での画像拡大
         img = canv_dst.copy() # 描画用に画像のコピーを作成
@@ -97,8 +98,6 @@ class drawTouch():
         if len(self.centroids) == 0: # 領域無し
             self.timelineMaxCentroids.append([]) # タイムラインに追加
         else:
-            # 注意!!!直前にやって失敗したら変更
-            # maxStatsID = 0
             maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
             for i, coord in enumerate(self.centroids):
                 # print(i)
@@ -155,19 +154,19 @@ class drawTouch():
             if nowPos: # 現在タッチ中なら
                 if abs(nowPos[0] - self.dragLog[-1][0]) > txNum * self.rate / 2: # 端処理，現在地と1つ前のx座標の差が全体の半分を超えたなら
                     if nowPos[0] > self.dragLog[-1][0]: 
-                        self.dragCorrect -= txNum * self.rate
+                        self.dragCorrect -= (txNum-1) * self.rate # 1週の座標合計値は2200であることが判明
                     else:
-                        self.dragCorrect += txNum * self.rate
+                        self.dragCorrect += (txNum-1) * self.rate
                 
                 self.dragLog.append((nowPos[0], nowPos[1])) # 現在地をログに追加
                 self.dragging()
-            elif not any(flagCircles[:dragNum]): # 6回分全てログが無いなら
+            elif not any(flagCircles[:dragNum]): # dragNum回分全てログが無いなら
                 self.dragLog.clear() # 配列のリセット
                 self.dragCorrect = 0 # 補正値のクリア
                 self.flagDrag = False # フラグオフ
                 self.dragEnd()
         else: # 未ドラッグ
-            if all(flagCircles[:dragNum]): # 過去6回分の履歴が存在する場合
+            if all(flagCircles[:dragNum]): # 過去dragNum回分の履歴が存在する場合
                 self.dragLog.append(self.timelineMaxCentroids[-1]) # 現在地をログに追加
                 self.flagDrag = True # フラグオン
                 self.dragStart()
@@ -193,8 +192,9 @@ class drawTouch():
                 self.arrow.clear()
                 self.flagFlick = -1
 
-        cv2.imshow("near", canv_near)
-        cv2.imshow("img", img) # 最終的な画像
+        if self.drawing: # 描画処理の有無
+            cv2.imshow("near", canv_near)
+            cv2.imshow("img", img) # 最終的な画像
 
     # 距離の測定
     # 端同士の場合，特殊処理あり
@@ -221,7 +221,7 @@ class drawTouch():
     # ドラッグ中
     # 座標格納配列を送信
     def dragging(self):
-        print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})") # x軸座標は補正値を含める
+        # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})") # x軸座標は補正値を含める
         pass
     # ドラッグ終了
     def dragEnd(self):
