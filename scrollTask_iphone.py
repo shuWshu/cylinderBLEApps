@@ -15,7 +15,7 @@ import time
 
 # -----パラメータ-----
 ID = 0
-DIST = 200
+DIST = 0
 MODE = "iphone"
 # -----パラメータ-----
 
@@ -68,5 +68,9 @@ class App_iphone(App):
         self.stop_event.set()  # 停止フラグを立てる
         return super().end()
 
-app = App_iphone(ID, DIST, MODE)
-app.run()
+def main():
+    app = App_iphone(ID, DIST, MODE)
+    app.run()
+
+if __name__ == "__main__":
+    main()

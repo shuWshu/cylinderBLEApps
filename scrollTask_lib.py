@@ -60,7 +60,7 @@ class App(ShowBase):
         ShowBase.__init__(self)
 
         self.ID = ID
-        self.DIST = DIST # 距離条件
+        self.DIST = DIST # 距離条件 0の場合は実験タスク
         self.MODE = MODE # 操作条件
 
         # ファイル名の決定&ファイルを開く処理
@@ -68,7 +68,7 @@ class App(ShowBase):
         while True:
             self.filename = f"result_scrollTask_{self.ID}_{self.MODE}_{self.serialNum}.csv"
             try:
-                self.file = open(f'results/{self.filename}', 'x') # ファイルそのもの
+                self.file = open(f'results/Participant_{self.ID}/{self.filename}', 'x') # ファイルそのもの
                 self.writer = csv.writer(self.file) # ライター
                 break
             except FileExistsError: # ファイルが既に存在している
@@ -77,7 +77,7 @@ class App(ShowBase):
         self.SCROLLSTEP = 0.005 # スクロール操作の倍率
         self.MAXNUM = 600 # スクロールの長さ
         self.STARTNUM = 300 # 最初の値
-        self.TARGETSDIST = [40, 100, 250] * 4
+        self.TARGETSDIST = [40, 100, 250] * 2
         if DIST == 0:
             self.TARGETS = []
             for i, d in enumerate(self.TARGETSDIST):
@@ -199,16 +199,17 @@ class App(ShowBase):
             # downtime = time.perf_counter() - self.lastSwitchTime
             timeNow = time.perf_counter()
             self.timeStamp.append(timeNow) # タイムスタンプ追加
-            self.writer.writerow([timeNow-self.startTime, "Selected"]) # ファイル書き込み
+            self.writer.writerow([timeNow-self.startTime, "selected"]) # ファイル書き込み
             self.taskProgress += 1
             if self.taskProgress == len(self.TARGETS): # タスク終了判定
                 return self.taskEnd(endTime=timeNow)
-            self.downtimeStart = time.perf_counter()
+            self.downtimeStart = timeNow
             
         if self.downtimeStart is None:
             self.gauge.setScale(0, 1, 1)
         else:
-            downtime = time.perf_counter() - self.downtimeStart
+            timeNow = time.perf_counter()
+            downtime = timeNow - self.downtimeStart
             if downtime >= 1.0: # 休憩1秒経過
                 self.downtimeStart = None
                 self.set_nextTarget()
@@ -219,7 +220,7 @@ class App(ShowBase):
     # ファイルを開き直す処理
     def fileReopen(self):
         self.file.close() # ファイルを閉じる
-        self.file = open(f'results/{self.filename}', 'w') # ファイルを上書きモードで再度開く
+        self.file = open(f'results/Participant_{self.ID}/{self.filename}', 'w') # ファイルを上書きモードで再度開く
         self.writer = csv.writer(self.file) # ライター
 
     # 次のターゲットに移る処理
@@ -239,6 +240,8 @@ class App(ShowBase):
         self.targetNum = nextTargetNum
         self.target.text = f"{self.targetNum}" # 次のターゲットに表示変更
         self.numbers[self.targetNum].fg=(1, 0, 0, 1)
+        timeNow = time.perf_counter()
+        self.writer.writerow([timeNow-self.startTime, "set"]) # ファイル書き込み
     
     # スタート処理
     def taskStart(self):
@@ -264,7 +267,7 @@ class App(ShowBase):
         self.target.text = f"END" # 表示変更
         self.target.fg=(1, 0, 0, 1) # 文字色変更
 
-        with open(f"results/result_scrollTask_{self.ID}.csv", "a") as f:
+        with open(f"results/Participant_{self.ID}/result_scrollTask_{self.ID}.csv", "a") as f:
             writer = csv.writer(f)
             writer.writerow([self.MODE, self.serialNum, self.DIST]+time_operation+[endTime - self.timeStamp[0]])
     
@@ -273,6 +276,7 @@ class App(ShowBase):
         x, y, z = self.node_scrollUImove.getPos()
         self.node_scrollUImove.setPos(x, y, self.STARTNUM*(0.3))
         self.scrollDist = 0.0 # 合計移動距離
+        self.selectNum = self.STARTNUM
         self.rotateCount = 0 # 残りの回転フレーム数
         self.rotateSpeed = 0 # 回転速度
 

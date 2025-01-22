@@ -25,19 +25,22 @@ class drawTouchFD(drawTouch):
         # self.app.carFlick(dx, dy, x, y)
         pass
 
-     # ドラッグ開始
-    def dragStart(self):
-        # print("dragStart")
-        self.app.scroll_start(self.dragLog[0])
-    # ドラッグ中
-    # 座標格納配列を送信
-    def dragging(self):
-        # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})")
-        self.app.scrolling(self.dragLog[-1][0])
-    # ドラッグ終了
-    def dragEnd(self):
-        # print("dragEnd")
-        self.app.scroll_end()
+    #  # ドラッグ開始
+    # def dragStart(self):
+    #     # print("dragStart")
+    #     self.app.scroll_start(self.dragLog[0])
+    # # ドラッグ中
+    # # 座標格納配列を送信
+    # def dragging(self):
+    #     # print(f"({self.dragLog[-1][0]+self.dragCorrect}, {self.dragLog[-1][1]})")
+    #     self.app.dragging(self.dragLog[-1][0])
+    # # ドラッグ終了
+    # def dragEnd(self):
+    #     # print("dragEnd")
+    #     self.app.scroll_end()
+
+    def scrolling(self, diff):
+        self.app.scrolling(diff*100)
 
 class App_cylinder(App):
     # コンストラクタ
@@ -46,7 +49,6 @@ class App_cylinder(App):
         App.__init__(self, ID, DIST, MODE)
 
         self.drawtouch = drawTouchFD(autoDraw=False, stopKey=False, drawing=False, app=self)
-        self.drawtouch.threshold = 80 # しきい値
         self.drawtouch.startDraw()
         self.flagEnd = False
 
@@ -68,7 +70,7 @@ class App_cylinder(App):
         self.draggedPos_x = startPos[0] # ドラッグ時の座標保存
 
     # ドラッグ中の処理
-    def scrolling(self, dragPos_x):
+    def dragging(self, dragPos_x):
         draggingPos_x = dragPos_x# 回転補正込みの現在地x
         delta = -(draggingPos_x - self.draggedPos_x)
         self.draggedPos_x = draggingPos_x
@@ -76,6 +78,17 @@ class App_cylinder(App):
             print(delta)
             self.rotate(delta_y=delta)
         pass
+
+    # 専用処理用の関数
+    def scrolling(self, diff):
+        correct = 1.0
+        self.rotate(delta_y=-diff*correct)
+
+    # ターゲット切り替え時に移動方向の設定を変更
+    def set_target(self):
+        scrollMode = (-1) * ((self.taskProgress % 2) * 2 - 1) # -1 or 1 を代入
+        self.drawtouch.setScrollMode(scrollMode)
+        return super().set_target()
 
     def scroll_end(self):
         pass
@@ -91,5 +104,9 @@ class App_cylinder(App):
         self.drawtouch.stop_program()
         return super().end()
 
-app = App_cylinder(ID, DIST, MODE)
-app.run()
+def main():
+    app = App_cylinder(ID, DIST, MODE)
+    app.run()
+
+if __name__ == "__main__":
+    main()

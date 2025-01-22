@@ -23,13 +23,18 @@ class drawTouch():
         self.timelineMaxCentroids = [] # 最大エリアの座標ログを格納
         self.flagFlick = -1 # フリック直前のフラグ -1:未準備，0:準備中，1~:表示フレーム数として管理
         self.rate = 100 # 拡大倍率
-        self.threshold = 50 # しきい値
+        self.threshold = 70 # しきい値
         self.flagEnd = False # 終了フラグ
         self.flagDrag = False # ドラッグ処理のフラグ
         self.dragLog = [] # ドラッグ中の座標を記録する
         self.dragCorrect = 0 # ドラッグ中における，1回転時のx座標補正
 
         self.deltaxLog = deque([0 for _ in range(5)], 5) # 変化量(変化した時限定)を5つ格納できるキュー
+
+        # -----スクロールタスク用-----
+        self.idmaxOld = None
+        self.scrollMode = 1 # スクロール方向 値の方向に動く 初期は-1から
+        self.scrolldist = 0 # スクロール累積値
 
         # キャリブレーション関連
         with open("BLEApps/thresholdsDict.json") as f:
@@ -55,6 +60,9 @@ class drawTouch():
                     break
                 elif cv2.waitKey(1)&0xff == ord("c") and self.stopKey:
                     self.calibrationStart()
+                elif cv2.waitKey(1)&0xff == ord("p") and self.stopKey: # スクロール累積値の出力とリセット
+                    print(f"self.scrolldist={self.scrolldist}")
+                    self.scrolldist = 0
                 elif self.flagEnd:
                     break
 
@@ -91,7 +99,7 @@ class drawTouch():
                 else:
                     if val < 250: # 250未満については黒色に変更（わかりづらいため）
                         val = 0
-                if rx < 3:
+                if rx < 1:
                     val = 0
                 canv[rx][tx] =  val * 255 / 1023 # 0~1023を0~255に正規化して代入
         canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
@@ -124,7 +132,7 @@ class drawTouch():
             self.centroids.append(center)
             self.stats.append(stats[i][4])
 
-        # 最大領域
+        # 一番明るい領域の指定
         idmax = np.unravel_index(np.argmax(canv), canv.shape) # canv内の最大値インデックスを取得→一番明るい座標
         val = canv[idmax[0]][idmax[1]]
         if val < self.threshold: # 領域無し
@@ -132,11 +140,11 @@ class drawTouch():
         else:
             # maxStatsID = self.stats.index(max(self.stats)) # 最大面積の領域を指定→微妙
             coordMax = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate)) # 最も明るい点について
-            img = cv2.circle(img, coordMax, 10, (0, 0, 255), thickness=-1)  # 最も明るい点が割り当てられる座標に描画
+            # img = cv2.circle(img, coordMax, 10, (255, 0, 0), thickness=-1)  # 最も明るい点が割り当てられる座標に描画
             self.timelineMaxCentroids.append(coordMax) # タイムラインに追加
 
-            for _, coord in enumerate(self.centroids):
-                img = cv2.circle(img, coord, 10, (255, 0, 0), thickness=-1) # 円の描画
+            # for _, coord in enumerate(self.centroids):
+            #     img = cv2.circle(img, coord, 10, (255, 0, 0), thickness=-1) # 円の描画
 
         flagCircles = [] # 過去n回目に，値があることを示す
         recentMaxCentroids = self.timelineMaxCentroids[-6:]
@@ -146,7 +154,7 @@ class drawTouch():
                 flagCircles.append(False)
                 continue
             flagCircles.append(True)
-            img = cv2.circle(img, coord, 10, (255, 0, 255), thickness=-1) # 円の描画
+            # img = cv2.circle(img, coord, 10, (255, 0, 255), thickness=-1) # 円の描画
         
         # 主にフリック処理
         if all(flagCircles[:3]): # 過去3回分の履歴が存在する場合
@@ -221,28 +229,28 @@ class drawTouch():
                 self.dragStart()
 
 
-        # 矢印の描画
-        if self.flagFlick > 0:
-            if abs(self.arrow[1][0] - self.arrow[0][0]) >  txNum * self.rate / 2: # 端処理
-                a0x, a0y = self.arrow[0][:]
-                a1x, a1y = self.arrow[1][:]
-                if a0x > a1x: # 小さい方に+2300, 大きい方に-2300
-                    a1x += txNum * self.rate
-                    a0x -= txNum * self.rate
-                else:
-                    a1x -= txNum * self.rate
-                    a0x += txNum * self.rate
-                cv2.arrowedLine(img, self.arrow[0], [a1x, a1y], (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
-                cv2.arrowedLine(img, [a0x, a0y], self.arrow[1], (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
-            else:
-                cv2.arrowedLine(img, self.arrow[0], self.arrow[1], (0, 255, 0), thickness=3, shift=0, tipLength=0.1)
-            self.flagFlick -= 1
-            if self.flagFlick == 0:
-                self.arrow.clear()
-                self.flagFlick = -1
+        # # 矢印の描画
+        # if self.flagFlick > 0:
+        #     if abs(self.arrow[1][0] - self.arrow[0][0]) >  txNum * self.rate / 2: # 端処理
+        #         a0x, a0y = self.arrow[0][:]
+        #         a1x, a1y = self.arrow[1][:]
+        #         if a0x > a1x: # 小さい方に+2300, 大きい方に-2300
+        #             a1x += txNum * self.rate
+        #             a0x -= txNum * self.rate
+        #         else:
+        #             a1x -= txNum * self.rate
+        #             a0x += txNum * self.rate
+        #         cv2.arrowedLine(img, self.arrow[0], [a1x, a1y], (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
+        #         cv2.arrowedLine(img, [a0x, a0y], self.arrow[1], (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
+        #     else:
+        #         cv2.arrowedLine(img, self.arrow[0], self.arrow[1], (0, 255, 0), thickness=3, shift=0, tipLength=0.1)
+        #     self.flagFlick -= 1
+        #     if self.flagFlick == 0:
+        #         self.arrow.clear()
+        #         self.flagFlick = -1
 
-        # 測定値のみを参照してドラッグ処理
-        self.dragCheckFromCanv(canv, img)
+        # スクロールタスク用の処理
+        self.scrollTask(idmax, val, img)
 
         if self.drawing: # 描画処理の有無
             cv2.imshow("near", canv_near)
@@ -307,7 +315,7 @@ class drawTouch():
 
     # ドラッグ開始
     def dragStart(self):
-        print("dragStart")
+        # print("dragStart")
         pass
     # ドラッグ中
     # 座標格納配列を送信
@@ -315,11 +323,11 @@ class drawTouch():
         # print(f"({self.dragLog[-1]})") # ドラッグ中座標の出力
         deltax = self.dragLog[-1][0]-self.dragLog[-2][0]
         if deltax != 0:
-            print(f"{deltax}({self.dragLog[-1][0]})") # x座標の変化値
-        pass
+            # print(f"{deltax}({self.dragLog[-1][0]})") # x座標の変化値
+            pass
     # ドラッグ終了
     def dragEnd(self):
-        print("dragEnd")
+        # print("dragEnd")
         pass
 
     def _stop_program(self):
@@ -365,6 +373,59 @@ class drawTouch():
         with open("BLEApps/thresholdsDict.json", 'w') as f:
             json.dump(self.thresholdsDict, f, indent=2) # json形式で保存
         print(self.thresholdsDict)
+
+
+    # ----- スクロールタスク専用関数 -----
+    # flagScrollModeRightを用いて回転方向を指定する
+    # タッチ点の座標と前の座標から，割り出す　逆回転は無し
+    # 引数: タッチしている点のid，その値
+    def scrollTask(self, idmax, val, img):
+        if self.idmaxOld is None: # 初回
+            self.idmaxOld = idmax
+            return
+        
+        # 古い点の描画
+        coordMaxold = (int((self.idmaxOld[1]+0.5)*self.rate), int((self.idmaxOld[0]+0.5)*self.rate)) # oldの座標
+        img = cv2.circle(img, coordMaxold, 10, (0, 255, 255), thickness=-1) # oldの描画
+
+        if val < self.threshold: # タッチ認識してない
+            return
+        
+        # 点の描画
+        coordMax = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate)) # 最も明るい点の画像中の座標
+        img = cv2.circle(img, coordMax, 10, (0, 0, 255), thickness=-1) # 最も明るい点の描画
+
+        diff = idmax[1] - self.idmaxOld[1] # 移動差分
+        if diff == 0: # 移動差分が0なら停止
+            return
+        quotient = diff * self.scrollMode # モードと差分の商 正なら一緒, 負なら違う
+        if quotient >= 0: # 方向が一致している
+            self.scrolling(diff)
+            cv2.arrowedLine(img, coordMaxold, coordMax, (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
+        elif quotient < 0: # 方向の不一致
+            if abs(diff) > (txNum-1)*(0.5): # スクロール距離が一定値より長いなら端として処理
+                diffa = np.sign(diff)*(abs(diff) - (txNum-1)) # 移動距離の反転
+                
+                #print("反転", end="")
+                self.scrolling(diffa)
+                coordMax = (int((idmax[1]+0.5)*self.rate), int((idmax[0]+0.5)*self.rate)) # 最も明るい点の画像中の座標
+                cv2.arrowedLine(img, coordMaxold, coordMax, (0, 0, 255), thickness=3, shift=0, tipLength=0.1)
+        else: # モードがそもそも0
+            self.scrolling(diff)
+            cv2.arrowedLine(img, coordMaxold, coordMax, (0, 255, 255), thickness=3, shift=0, tipLength=0.1)
+        self.idmaxOld = idmax # 更新
+
+    # スクロールタスク用のコールバック
+    def scrolling(self, diff):
+        self.scrolldist += diff
+        print(f"{diff}")
+    # スクロールモードの切り替え
+    def setScrollMode(self, num):
+        self.scrollMode = num
+        if num > 0:
+            print("右回転")
+        if num < 0:
+            print("左回転")
 
 def main():
     drawtouch = drawTouch()
