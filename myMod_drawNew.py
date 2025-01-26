@@ -10,6 +10,9 @@ import threading
 import time
 import numpy as np
 import cv2
+import math
+from scipy.signal import convolve2d
+import pyautogui
 
 # from make_circle import make_circle
 
@@ -56,12 +59,12 @@ class BLEreader():
                 for rx in range(rxNum):
                     val2bit = (dataTx >> rx*2) & 0x03
                     self.gridDatas[tx][rx] = val2bit
-            # 出力部分
-            for rx in range(rxNum):
-                for tx in range(txNum):
-                    print(self.gridDatas[tx][rx], end="")
-                print()
-            print()
+            # # 出力部分
+            # for rx in range(rxNum):
+            #     for tx in range(txNum):
+            #         print(self.gridDatas[tx][rx], end="")
+            #     print()
+            # print()
         
     # ble関連処理
     async def _run_asyncio(self, address):
@@ -94,15 +97,22 @@ class BLEreader():
         self.stop_event.set()  # 停止フラグを立てる
         print(f"BLE FPS: {self.count / (self.endTime - self.startTime)}")
 
-class drawTouch():
-    def __init__(self, autoDraw=True, stopKey=True, drawing=True):
+class drawCV2():
+    def __init__(self, autoDraw=True, stopKey=True, drawing=True, outMP4=False):
         self.rate = 100 # 拡大倍率
         self.flagEnd = False # 終了フラグ
         self.autoDraw = autoDraw # ドロー処理を自動的に行うか
         self.stopKey = stopKey # "q"キーでの停止などのキー処理の有無
         self.drawing = drawing # 描画結果を画面に出力するか
+        self.outMP4 = outMP4 # 動画出力するか
         self.startTime = None
+        self.canv_prev = None
+        self.diff_x = 0.0 # x軸移動値の合計
         self.count = 0
+
+        fps = 30
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.out = cv2.VideoWriter('BLEApps/output.mp4', fourcc, fps, ((txNum+10), rxNum), isColor=False)
 
         self.blereader = BLEreader()
 
@@ -113,10 +123,14 @@ class drawTouch():
             while 1:
                 self.updateDraw()
                 key = cv2.waitKey(1)&0xff
-                if key == ord("q") and self.stopKey:
+                if key == 27 and self.stopKey: # escでコード停止
                     self._stop_program()
                     break
                 elif self.flagEnd:
+                    break
+                # 非描画時に時限ストップさせる関数
+                if not self.drawing and self.count > 600:
+                    self._stop_program()
                     break
 
     # 描画の更新
@@ -126,14 +140,69 @@ class drawTouch():
         self.endTime = time.perf_counter() # 最後の時間の更新
         self.count += 1 # 描画回数の記録
 
-        canv = self.blereader.getGridDatas().T * 50
+        canv = self.blereader.getGridDatas() # グリッドの取得
+        
+        canv = canv * 50 # 関数処理
+        kernel = [[1/4, 1/2, 1/4],
+                  [1/2, 1, 1/2],
+                  [1/4, 1/2, 1/4]] # 3x3 のフィルタ
+        kernel = kernel / np.sum(kernel) 
+        # kernel = [[1/3, 1/3, 1/3]] # 横方向（=rx方向）のみの平均フィルタ
+        canv = convolve2d(canv, kernel, mode='same', boundary='symm', fillvalue=0) # 畳み込み
+
+        canv = canv.astype(np.uint8) # 整数に戻す
+        canv = np.concatenate([canv, canv[:10]]).T  # 横幅の延長，転置
+
+        if not self.canv_prev is None:
+            # オプティカルフロー処理
+            flow = cv2.calcOpticalFlowFarneback(
+                self.canv_prev,          # 前フレーム(グレースケール)
+                canv,          # 現フレーム(グレースケール)
+                None,               # 出力：光フロー (初期値なし)
+                pyr_scale=0.5,      # 各レベルの画像スケール (ピラミッド)
+                levels=3,           # ピラミッドのレベル数
+                winsize=15,         # 窓サイズ (平均を取る範囲)
+                iterations=3,       # 各レベルでの反復回数
+                poly_n=5,           # ガウス近似に使う領域サイズ
+                poly_sigma=1.2,     # poly_n に対するガウス標準偏差
+                flags=0
+            )
+            sum_x = flow[..., 0].sum() # x方向移動ベクトルの合計
+            sum_y = flow[..., 1].sum() # y方向移動ベクトルの合計
+            self.diff_x += sum_x
+            print(self.diff_x)
+        self.canv_prev = canv[:] # 前のフレームを保存
+        
         canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
+        #canv_dst = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_CUBIC) # バイキュービック補間での画像拡大
+        canv_b = np.zeros_like(canv_near) # 同じ大きさの黒い画像
+
+        threshold = 30 # 2値化の閾値
+        _, canv_binary = cv2.threshold(canv_near, threshold, 255, cv2.THRESH_BINARY) # 二値化（閾値は第二引数）
+        # ラベル数, ラベル番号が振られた配列(入力画像と同じ大きさ), 物体ごとの座標と面積(ピクセル数), 物体ごとの中心座標
+        retval, labels, stats, centroids = cv2.connectedComponentsWithStats(canv_binary) # 塊のラベリング処理
+
+        img = canv_near
+        # 領域の中心座標を描画
+        for i, coord in enumerate(centroids):
+            if(math.isnan(coord[0]) or math.isnan(coord[1])):
+                continue
+            center = (int(coord[0]), int(coord[1]))
+            if canv_binary[center[1]][center[0]] == 0: # 領域が黒なら
+                continue
+            img = cv2.circle(img, center, 10, (255, 0, 0), thickness=-1)
+            #print(center, end="")
+        #print()
+
         if self.drawing: # 描画処理の有無
-            cv2.imshow("near", canv_near)
-            # cv2.imshow("img", img) # 最終的な画像
+            cv2.imshow("img", img) # 画像出力
+        if self.outMP4: # 動画保存
+            print(self.outMP4)
+            self.out.write(img)
 
     def _stop_program(self):
         self.blereader.stop_program()
+        self.out.release()
         print(f"draw FPS: {self.count / (self.endTime - self.startTime)}")
 
     # 外部からの呼び出し用
@@ -141,8 +210,17 @@ class drawTouch():
         self._stop_program()
         self.flagEnd = True
 
+    # # 別スレッドを起動する
+    # def _run_scroll(self):
+    #     while not self.flagEnd:
+    #         pyautogui.scroll(self.diff_x)
+        
+    # def startScroll(self):
+    #     self.thread_scroll = threading.Thread(target=self._run_scroll) # BLEスレッドの作成
+    #     self.thread_scroll.start()
+
 def main():
-    drawtouch = drawTouch()
+    drawtouch = drawCV2(drawing=True,  outMP4=False)
     drawtouch.startDraw()
 
 if __name__ == "__main__":
