@@ -2,6 +2,7 @@
 自作モジュール
 新ver用の描画プログラム
 機能的には元来のプログラムのReaderとdrawの混合
+スクロール機能も搭載
 """
 
 import asyncio
@@ -98,17 +99,25 @@ class BLEreader():
         print(f"BLE FPS: {self.count / (self.endTime - self.startTime)}")
 
 class drawCV2():
-    def __init__(self, autoDraw=True, stopKey=True, drawing=True, outMP4=False):
+    def __init__(self, autoDraw=True, stopKey=True, drawing=True, outMP4=False, scroll=False):
         self.rate = 100 # 拡大倍率
         self.flagEnd = False # 終了フラグ
         self.autoDraw = autoDraw # ドロー処理を自動的に行うか
         self.stopKey = stopKey # "q"キーでの停止などのキー処理の有無
         self.drawing = drawing # 描画結果を画面に出力するか
         self.outMP4 = outMP4 # 動画出力するか
-        self.startTime = None
+        self.scroll = scroll
+        
         self.canv_prev = None
+        self.diff_scroll = 0.0
         self.diff_x = 0.0 # x軸移動値の合計
+        self.diff_y = 0.0 # y軸移動値の合計
+
+        # fps測定用
+        self.startTime = None
+        self.startTime_scroll = None
         self.count = 0
+        self.count_scroll = 0
 
         fps = 30
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -119,18 +128,20 @@ class drawCV2():
     # 描画開始と処理
     def startDraw(self):
         self.blereader.startBLE()
+        if self.scroll:
+            self.startScroll()
         if self.autoDraw:
             while 1:
                 self.updateDraw()
                 key = cv2.waitKey(1)&0xff
                 if key == 27 and self.stopKey: # escでコード停止
-                    self._stop_program()
+                    self.stop_program()
                     break
                 elif self.flagEnd:
                     break
                 # 非描画時に時限ストップさせる関数
                 if not self.drawing and self.count > 600:
-                    self._stop_program()
+                    self.stop_program()
                     break
 
     # 描画の更新
@@ -142,19 +153,21 @@ class drawCV2():
 
         canv = self.blereader.getGridDatas() # グリッドの取得
         
-        canv = canv * 50 # 関数処理
+        canv = canv * 85 # 関数処理
         kernel = [[1/4, 1/2, 1/4],
-                  [1/2, 1, 1/2],
+                  [1/2,   1, 1/2],
                   [1/4, 1/2, 1/4]] # 3x3 のフィルタ
         kernel = kernel / np.sum(kernel) 
         # kernel = [[1/3, 1/3, 1/3]] # 横方向（=rx方向）のみの平均フィルタ
         canv = convolve2d(canv, kernel, mode='same', boundary='symm', fillvalue=0) # 畳み込み
-
         canv = canv.astype(np.uint8) # 整数に戻す
-        canv = np.concatenate([canv, canv[:10]]).T  # 横幅の延長，転置
 
-        if not self.canv_prev is None:
-            # オプティカルフロー処理
+        canv_out = canv[:].T # 描画用のcanv
+
+        canv = np.concatenate([canv, canv]).T  # 横幅の延長，転置
+        canv = np.concatenate([canv, canv]) # 縦幅の延長
+
+        if not self.canv_prev is None: # オプティカルフロー処理
             flow = cv2.calcOpticalFlowFarneback(
                 self.canv_prev,          # 前フレーム(グレースケール)
                 canv,          # 現フレーム(グレースケール)
@@ -167,15 +180,20 @@ class drawCV2():
                 poly_sigma=1.2,     # poly_n に対するガウス標準偏差
                 flags=0
             )
-            sum_x = flow[..., 0].sum() # x方向移動ベクトルの合計
-            sum_y = flow[..., 1].sum() # y方向移動ベクトルの合計
+            sum_x = flow[..., 0].sum() / len(flow[..., 0]) # x方向移動ベクトルの平均 
+            sum_y = flow[..., 1].sum() / len(flow[..., 1])# y方向移動ベクトルの平均 xよりもうまく行っていない
             self.diff_x += sum_x
-            print(self.diff_x)
+            self.diff_y += sum_y
+            if abs(sum_y) > 5:
+                self.sliding(diff=sum_y)
+            if abs(sum_x) > 5:
+                self.scrolling(diff=sum_x)
+                #print(sum_x)
         self.canv_prev = canv[:] # 前のフレームを保存
         
-        canv_near = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
+        canv_near = cv2.resize(canv_out, (canv_out.shape[1]*self.rate, canv_out.shape[0]*self.rate), interpolation=cv2.INTER_NEAREST) # 通常の拡大
         #canv_dst = cv2.resize(canv, (canv.shape[1]*self.rate, canv.shape[0]*self.rate), interpolation=cv2.INTER_CUBIC) # バイキュービック補間での画像拡大
-        canv_b = np.zeros_like(canv_near) # 同じ大きさの黒い画像
+        #canv_b = np.zeros_like(canv_near) # 同じ大きさの黒い画像
 
         threshold = 30 # 2値化の閾値
         _, canv_binary = cv2.threshold(canv_near, threshold, 255, cv2.THRESH_BINARY) # 二値化（閾値は第二引数）
@@ -196,31 +214,50 @@ class drawCV2():
 
         if self.drawing: # 描画処理の有無
             cv2.imshow("img", img) # 画像出力
-        if self.outMP4: # 動画保存
-            print(self.outMP4)
-            self.out.write(img)
+        # if self.outMP4: # 動画保存
+        #     print(self.outMP4)
+        #     self.out.write(img)
 
-    def _stop_program(self):
+    def stop_program(self):
         self.blereader.stop_program()
         self.out.release()
-        print(f"draw FPS: {self.count / (self.endTime - self.startTime)}")
-
-    # 外部からの呼び出し用
-    def stop_program(self):
-        self._stop_program()
         self.flagEnd = True
+        print(f"draw FPS: {self.count / (self.endTime - self.startTime)}")
+        if self.scroll:
+            print(f"scroll FPS: {self.count_scroll / (self.endTime_scroll - self.startTime_scroll)}")
 
-    # # 別スレッドを起動する
-    # def _run_scroll(self):
-    #     while not self.flagEnd:
-    #         pyautogui.scroll(self.diff_x)
-        
-    # def startScroll(self):
-    #     self.thread_scroll = threading.Thread(target=self._run_scroll) # BLEスレッドの作成
-    #     self.thread_scroll.start()
+    # スクロール処理用 スレッドを起動する
+    # TODO:処理が重すぎる...
+    def _run_scroll(self):
+        while not self.flagEnd: # 0.1秒ごとに処理
+            if(self.startTime_scroll is None):
+                self.startTime_scroll = time.perf_counter() # 開始時間の記録
+            self.endTime_scroll = time.perf_counter() # 最後の時間の更新
+            self.count_scroll += 1 # 描画回数の記録
+            
+            print(self.diff_scroll)
+            pyautogui.scroll(self.diff_scroll*0.1)
+            self.diff_scroll = 0.0
+            time.sleep(0.05)
+
+    def startScroll(self):
+        self.thread_scroll = threading.Thread(target=self._run_scroll) # BLEスレッドの作成
+        self.thread_scroll.start()
+
+    # -----アプリで呼び出す用の関数-----
+    # 円周方向へのスライド操作
+    def scrolling(self, diff):
+        print(diff)
+        pass
+    # 円筒軸方向へのスライド操作
+    def sliding(self, diff):
+        print(diff)
+        pass
+    def flicking(self, diff):
+        pass
 
 def main():
-    drawtouch = drawCV2(drawing=True,  outMP4=False)
+    drawtouch = drawCV2(drawing=True,  outMP4=False, scroll=False)
     drawtouch.startDraw()
 
 if __name__ == "__main__":

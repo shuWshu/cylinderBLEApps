@@ -288,20 +288,21 @@ class App(ShowBase):
     # ホイール関連に関わる処理
     # 外部的には，移動距離を入力するだけで良い
     def rotate(self, delta_y):
-        timeNow = time.perf_counter()
-        self.writer.writerow([timeNow-self.startTime, delta_y]) # ファイル書き込み
-        self.scrollDist += delta_y # 合計移動距離の記録
-        selectNum = -round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 現在の目盛りの割出
-        if self.selectNum != selectNum: # 目盛りが切り替わっていたら
-            self.lastSwitchTime = timeNow # 時間を更新
-            self.selectNum = selectNum # 選択値の変更
+        self.rotateDraw(delta_y=delta_y)
+        # timeNow = time.perf_counter()
+        # self.writer.writerow([timeNow-self.startTime, delta_y]) # ファイル書き込み
+        # self.scrollDist += delta_y # 合計移動距離の記録
+        # selectNum = -round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 現在の目盛りの割出
+        # if self.selectNum != selectNum: # 目盛りが切り替わっていたら
+        #     self.lastSwitchTime = timeNow # 時間を更新
+        #     self.selectNum = selectNum # 選択値の変更
 
-            self.rotateCount = self.ROTATEFRAME # 残りの回転フレーム数の設定
-            _, _, z = self.node_scrollUImove.getPos() # 現在のz座標を取得
-            rotateTo = (selectNum)*0.3 # 移動先Z座標の割出
-            self.rotateSpeed = (rotateTo-z)/self.ROTATEFRAME # 回転速度の設定
-        # print(self.selectNum)
-        self.lastMoveTime = timeNow # 最終移動時間を更新
+        #     self.rotateCount = self.ROTATEFRAME # 残りの回転フレーム数の設定
+        #     _, _, z = self.node_scrollUImove.getPos() # 現在のz座標を取得
+        #     rotateTo = (selectNum)*0.3 # 移動先Z座標の割出
+        #     self.rotateSpeed = (rotateTo-z)/self.ROTATEFRAME # 回転速度の設定
+        # # print(self.selectNum)
+        # self.lastMoveTime = timeNow # 最終移動時間を更新
 
     def end(self):
         self.file.close()
