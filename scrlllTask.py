@@ -1,4 +1,4 @@
-from scrollTask_cylinder import App_cylinder
+from scrollTask_cylinderNew import App_cylinder
 from scrollTask_iphone import App_iphone
 
 # -----パラメータ-----

@@ -36,7 +36,9 @@ class App_cylinder(App):
         self.drawCV2.startDraw()
         self.flagEnd = False
 
-        self.SCROLLSTEP = 0.003 # スクロール操作の倍率
+        self.SCROLLSTEP = -0.44 # スクロール操作の倍率
+        # 右利きなら-，左利きなら+
+
         # 処理を別スレッドに移す
         thread = threading.Thread(target=self.updateDrawtouch)
         thread.start()
@@ -51,7 +53,7 @@ class App_cylinder(App):
 
     # 専用処理用の関数
     def scrolling(self, diff):
-        correct = 0.01
+        correct = 1
         print(diff)
         self.rotate(delta_y=-diff*correct)
 

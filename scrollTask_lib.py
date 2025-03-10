@@ -102,8 +102,6 @@ class App(ShowBase):
         self.lastMoveTime = time.perf_counter() # 最後に移動した時間を記録
         self.lastSwitchTime = time.perf_counter() # 最後に目盛りを切り替えた時間を記録
         self.ROTATEFRAME = 3 # 回転に要するフレーム数
-        self.rotateCount = 0 # 残りの回転フレーム数
-        self.rotateSpeed = 0 # 回転速度
 
         # ウインドウの設定
         self.properties = WindowProperties()
@@ -178,10 +176,7 @@ class App(ShowBase):
     # アップデート処理
     def update(self, task):
         if self.taskProgress >= 0: # タスク進捗が負ではない
-            self.updateReachTarget()
-        if self.rotateCount > 0: # 回転中
-            self.rotateCount -= 1
-            self.rotateDraw(self.rotateSpeed)
+            self.updateReachTarget() # ターゲット到達処理
         return task.cont
     
     # ターゲットに到達したかを判定する
@@ -189,33 +184,33 @@ class App(ShowBase):
     def updateReachTarget(self):
         flagReach = False
         if self.taskProgress % 2 == 0: # タスク進捗が偶数→大きい数字へ移動する
-            if self.selectNum >= self.targetNum: # ターゲット以上まで移動した
+            if self.selectNum >= self.targetNum and self.selectNum <= self.targetNum+4: # ターゲット以上まで移動したかつ，5つ以内の入っている
                 flagReach = True
         else: # タスク進捗が奇数→小さい数字へ移動する
-            if self.selectNum <= self.targetNum: # ターゲット以下まで移動した
+            if self.selectNum <= self.targetNum and self.selectNum >= self.targetNum-4: # ターゲット以下まで移動したかつ，5つ以内の中に入っている
                 flagReach = True
 
-        if flagReach == True and self.downtimeStart is None: # ターゲットを通過している
-            # downtime = time.perf_counter() - self.lastSwitchTime
+        if flagReach == True: # ターゲット範囲内
             timeNow = time.perf_counter()
-            self.timeStamp.append(timeNow) # タイムスタンプ追加
-            self.writer.writerow([timeNow-self.startTime, "selected"]) # ファイル書き込み
-            self.taskProgress += 1
-            if self.taskProgress == len(self.TARGETS): # タスク終了判定
-                return self.taskEnd(endTime=timeNow)
-            self.downtimeStart = timeNow
-            
-        if self.downtimeStart is None:
-            self.gauge.setScale(0, 1, 1)
+            if self.downtimeStart is None: # タイマーが未スタート
+                self.downtimeStart = timeNow
+            else: 
+                downtime = timeNow - self.downtimeStart
+                if downtime >= 1.0: # 1秒以上経過
+                    self.downtimeStart = None # タイマーリセット
+                    self.gauge.setScale(0, 1, 1) # ゲージリセット
+                    
+                    self.timeStamp.append(timeNow) # タイムスタンプ追加
+                    self.writer.writerow([timeNow-self.startTime, "selected"]) # ファイル書き込み
+                    self.taskProgress += 1 # タスク進捗追加
+                    if self.taskProgress == len(self.TARGETS): # タスク終了判定
+                        return self.taskEnd(endTime=timeNow)
+                    self.set_nextTarget()
+                else:
+                    self.gauge.setScale(downtime, 1, 1) # ゲージ更新
         else:
-            timeNow = time.perf_counter()
-            downtime = timeNow - self.downtimeStart
-            if downtime >= 1.0: # 休憩1秒経過
-                self.downtimeStart = None
-                self.set_nextTarget()
-            self.gauge.setScale(1 - downtime, 1, 1)
-        
-        
+            self.downtimeStart = None # タイマーリセット
+            self.gauge.setScale(0, 1, 1) # タイマーリセット
     
     # ファイルを開き直す処理
     def fileReopen(self):
@@ -227,11 +222,10 @@ class App(ShowBase):
     def set_nextTarget(self):
         x, y, z = self.node_scrollUImove.getPos() # 現在位置を取得
         self.node_scrollUImove.setPos(x, y, self.TARGETS[self.taskProgress-1]*(0.3)) # 前のターゲットの位置まで戻る
-        self.scrollDist = -(self.TARGETS[self.taskProgress-1]-self.STARTNUM)*(0.3) / self.SCROLLSTEP # 合計移動距離を合わせる
-        self.selectNum = -round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 選択した値も合わせる
-        self.rotateCount = 0 # 残りの回転フレーム数
-        self.rotateSpeed = 0 # 回転速度
-        self.numbers[self.TARGETS[self.taskProgress-1]].fg=(0, 0, 0, 1) # 文字色を黒に戻す
+        self.scrollDist = (self.TARGETS[self.taskProgress-1]-self.STARTNUM)*(0.3) / self.SCROLLSTEP # 合計移動距離を合わせる
+        self.selectNum = round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 選択した値も合わせる
+        for r in self.reds:
+            self.numbers[r].fg=(0, 0, 0, 1) # 文字色をまとめて黒に戻す
         self.set_target()
 
     # ターゲット設定処理
@@ -239,7 +233,12 @@ class App(ShowBase):
         nextTargetNum = self.TARGETS[self.taskProgress] # 次のターゲットを取得
         self.targetNum = nextTargetNum
         self.target.text = f"{self.targetNum}" # 次のターゲットに表示変更
-        self.numbers[self.targetNum].fg=(1, 0, 0, 1)
+        if self.taskProgress % 2 == 0:
+            self.reds = range(self.targetNum, self.targetNum+5) # 赤に変える文字を格納
+        else:
+            self.reds = range(self.targetNum-4, self.targetNum+1)
+        for r in self.reds:
+            self.numbers[r].fg=(1, 0, 0, 1) # 文字色をまとめて変える
         timeNow = time.perf_counter()
         self.writer.writerow([timeNow-self.startTime, "set"]) # ファイル書き込み
     
@@ -277,32 +276,25 @@ class App(ShowBase):
         self.node_scrollUImove.setPos(x, y, self.STARTNUM*(0.3))
         self.scrollDist = 0.0 # 合計移動距離
         self.selectNum = self.STARTNUM
-        self.rotateCount = 0 # 残りの回転フレーム数
-        self.rotateSpeed = 0 # 回転速度
 
     # ホイール回転を描画
     def rotateDraw(self, delta_y):
         x, y, z = self.node_scrollUImove.getPos()
-        self.node_scrollUImove.setPos(x, y, z+delta_y)
+        self.node_scrollUImove.setPos(x, y, z+delta_y*self.SCROLLSTEP)
+        self.scrollDist += delta_y # 合計移動距離の記録
+        self.selectNum = round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 現在の目盛りの割出
+        print(self.selectNum)
 
     # ホイール関連に関わる処理
     # 外部的には，移動距離を入力するだけで良い
     def rotate(self, delta_y):
-        self.rotateDraw(delta_y=delta_y)
-        # timeNow = time.perf_counter()
-        # self.writer.writerow([timeNow-self.startTime, delta_y]) # ファイル書き込み
-        # self.scrollDist += delta_y # 合計移動距離の記録
-        # selectNum = -round(self.scrollDist * self.SCROLLSTEP / 0.30) + self.STARTNUM # 現在の目盛りの割出
-        # if self.selectNum != selectNum: # 目盛りが切り替わっていたら
-        #     self.lastSwitchTime = timeNow # 時間を更新
-        #     self.selectNum = selectNum # 選択値の変更
-
-        #     self.rotateCount = self.ROTATEFRAME # 残りの回転フレーム数の設定
-        #     _, _, z = self.node_scrollUImove.getPos() # 現在のz座標を取得
-        #     rotateTo = (selectNum)*0.3 # 移動先Z座標の割出
-        #     self.rotateSpeed = (rotateTo-z)/self.ROTATEFRAME # 回転速度の設定
-        # # print(self.selectNum)
-        # self.lastMoveTime = timeNow # 最終移動時間を更新
+        if delta_y == 0:
+            return
+        timeNow = time.perf_counter()
+        self.writer.writerow([timeNow-self.startTime, delta_y]) # ファイル書き込み
+        self.rotateDraw(delta_y=delta_y) # 回転の描画
+        # print(self.selectNum)
+        self.lastMoveTime = timeNow # 最終移動時間を更新
 
     def end(self):
         self.file.close()

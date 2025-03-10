@@ -33,7 +33,7 @@ class App_iphone(App):
         self.stop_event = threading.Event()  # 停止フラグ
         self.data_lock = threading.Lock() 
 
-        self.SCROLLSTEP = 0.3 / 55.0 # スクロール操作の倍率
+        self.SCROLLSTEP = - 0.3 / 55.0 # スクロール操作の倍率
 
         self.startBLE()
 
